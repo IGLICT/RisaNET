@@ -1,6 +1,6 @@
 # RISA-Net: Rotation-Invariant and Structure-Aware Network for Fine-grained 3D Shape Retrieval
 Rao FU, Jie Yang, Jiawei Sun, Fanglue Zhang, Yu-Kun Lai and Lin Gao.
-[Project Page](./)
+[Project Page](https://github.com/IGLICT/RisaNET/)
 
 ![Teaser Image](./images/teaser.png)
 
@@ -34,13 +34,11 @@ pip install -r requirements.txt
 After the environment is set up, you can train our network. Please run:
 ```
 python risanet.py -a 1e3 -b 1e2 -c 1e0 -d 1e3 -e 1e2 -f 5000 -x 0.3 -y 0.3 -s 32 -m 32 -n 32
-
 ```
 
 After the network is trained, you can load the shape descriptors for shape retrieval. Please run:
 ```
 python risanet.py -r /path/to/checkpoint -k 5000
-
 ```
 
 ### 3) Demos
