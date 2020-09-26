@@ -46,9 +46,3 @@ python risanet.py -r /path/to/checkpoint -k 5000
 Here we provide some retrieval results on several datasets.
 ![Result Image](./images/sample_car.jpg)
 ![Result Image](./images/sample_plane.jpg)
-
-### Citation
-If you use this code for your research, please consider citing:
-```
-hahaha
-```
