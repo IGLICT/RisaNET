@@ -28,9 +28,9 @@ epoch_num_2 = 10000
 batch_size = 32
 ### Change Datapath for corresponding features...
 restore_path = ''
-matpath = './feature/guitar/edgefeature.mat'
-label_path = './feature/guitar/labelMatrix.mat'
-struct_path = './feature/guitar/structMatrix.mat'
+matpath = './pre_processed_features/guitar/edgefeature.mat'
+label_path = './pre_processed_features/guitar/labelMatrix.mat'
+struct_path = './pre_processed_features/guitar/structMatrix.mat'
 
 ### Parsing...
 opts, args = getopt.getopt(sys.argv[1:], "a:b:c:d:e:l:f:x:y:m:n:p:s:r:k:", \
