@@ -17,8 +17,6 @@ def load_data_new(path):
     mask_sum = np.sum(edgefeature_x, axis=3)
     mask_sum = np.sum(mask_sum, axis=2)
     mask_x = np.where(mask_sum == 0, mask_sum, 1)
-    print("Mask shape is ", np.shape(mask_x))
-    print("Mask content is ", np.sum(mask_x, axis=1))
 
     e_neighbour = data['e_neighbour']
     e_nb = load_neighbour(e_neighbour, edgenum)
@@ -33,17 +31,17 @@ def load_neighbour(neighbour, edges, is_padding=False):
     if is_padding == True:
         x = np.zeros((edges + 1, 4)).astype('int32')
 
-        for i in xrange(0, edges):
+        for i in range(0, edges):
             x[i + 1] = data[:, i] + 1
 
-            for j in xrange(0, 4):
+            for j in range(0, 4):
                 if x[i + 1][j] == -1:
                     x[i + 1][j] = 0
 
     else:
         x = np.zeros((edges, 4)).astype('int32')
 
-        for i in xrange(0, edges):
+        for i in range(0, edges):
             x[i] = data[:, i]
 
     return x

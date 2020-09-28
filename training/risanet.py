@@ -10,6 +10,7 @@ from utils import leaky_relu, leaky_relu2, batch_norm_wrapper
 from data_loader import load_data_new, load_neighbour, load_labelMatrix, load_structMatrix
 from meshvae import meshVAE
 
+### Some hyper-parameters...
 learning_rate = 0.00001
 lambda1 = 1
 lambda2 = 1
@@ -25,13 +26,15 @@ mat = 'guitar'
 epoch_num = 10000
 epoch_num_2 = 10000
 batch_size = 32
+### Change Datapath for corresponding features...
 restore_path = ''
-matpath = 'edgefeature.mat'
-label_path = './labelMatrix.mat'
-struct_path = './8_structMatrix.mat'
-labelSeq_path = './labelSeq.mat'
-opts, args = getopt.getopt(sys.argv[1:], "a:b:c:d:l:e:f:x:y:m:n:p:s:r:k:", \
-	["KL1", "trip1", "KL2", "trip2", "learning_rate", "bound1", "bound2", "hid1", "hid2", "matname", "epoch_num","epoch_num2","batch_size","restore","ckpt"])
+matpath = './feature/guitar/edgefeature.mat'
+label_path = './feature/guitar/labelMatrix.mat'
+struct_path = './feature/guitar/structMatrix.mat'
+
+### Parsing...
+opts, args = getopt.getopt(sys.argv[1:], "a:b:c:d:e:l:f:x:y:m:n:p:s:r:k:", \
+	["KLpart", "Trippart", "Part2Global", "KLglobal", "Tripglobal", "learning_rate", "epoch_num", "BoundPart", "BoundGlobal", "HidePart", "HideGlobal", "matname", "batch_size","restore_path","ckpt_path"])
 print(opts, args)
 for op, value in opts:
     print(op, value)
@@ -43,24 +46,24 @@ for op, value in opts:
     	lambda3 = float(value)
     elif op == "-d":
     	lambda4 = float(value)
+    elif op == "-e":
+        lambda5 = float(value)
     elif op == "-l":
         learning_rate = float(value)
+    elif op == "-f":
+        epoch_num = int(value)
     elif op == "-x":
     	bound = float(value)
     elif op == "-y":
-        bound_2 = float(value)    
-    elif op == "-p":
-        mat = value
-    elif op == "-e":
-        lambda5 = float(value)
-    elif op == "-f":
-        epoch_num = int(value)        
-    elif op == "-s":
-        batch_size = int(value)        
+        bound_2 = float(value)
     elif op == "-m":
         latent_zdim = int(value)
     elif op == "-n":
-    	latent_zdim_2 = int(value)
+        latent_zdim_2 = int(value)    
+    elif op == "-p":
+        mat = value     
+    elif op == "-s":
+        batch_size = int(value)        
     elif op == "-r":
     	restore_path = value
     elif op == "-k":
@@ -68,8 +71,8 @@ for op, value in opts:
     else:
         sys.exit()
 
+### Create directories to record training process...
 matname = './' + mat + '.mat'
-
 config = tf.ConfigProto()
 config.gpu_options.allow_growth = True
 session = tf.Session(config=config)
@@ -89,7 +92,7 @@ class risaNET():
         self.partVAE = []
         for i in range(self.part_num):
             print("# Making Part {}".format(i))
-            self.partVAE.append(meshVAE(self.e_nb, self.edgenum, self.degree, self.maxdegree, part_no=i))
+            self.partVAE.append(meshVAE(batch_size, label_path, latent_zdim, bound, lambda1, learning_rate, self.e_nb, self.edgenum, self.degree, self.maxdegree, part_no=i))
 
         # Get Label Matrix
         self.labelMatrix = load_labelMatrix(label_path)
@@ -101,73 +104,55 @@ class risaNET():
         self.structMatrix = load_structMatrix(struct_path)
         self.input_struct = tf.placeholder(tf.float32, [None, 8*(self.part_num)], name='struct_batch')
         self.latent_set = []
-        self.tlatent_set = []
         for i in range(self.part_num):
             self.latent_set.append(self.partVAE[i].z_mean)
-            self.tlatent_set.append(self.partVAE[i].tz_mean)
-
+        self.Wk = []
+        self.Wq = []
         self.latent_struct = tf.transpose(self.latent_set, perm=[1, 0, 2])
-        self.tlatent_struct = tf.transpose(self.tlatent_set, perm=[1, 0, 2])
         for p in range(self.part_num):
             self.Wk.append(tf.get_variable("W_key"+str(p), [latent_zdim, key_dim], tf.float32, tf.random_normal_initializer(stddev=0.02)))
             self.Wq.append(tf.get_variable("W_query"+str(p), [latent_zdim, key_dim], tf.float32, tf.random_normal_initializer(stddev=0.02)))
         self.s_r, self.atten_latent_struct = self.attention_mechanism( self.latent_struct, self.Wk, self.Wq, key_dim, latent_zdim)
-        self.ts_r, self.atten_tlatent_struct = self.attention_mechanism( self.tlatent_struct, key_dim, latent_zdim)
         self.atten_latent_struct = tf.reshape(self.atten_latent_struct, shape=[tf.shape(self.partVAE[0].z_mean)[0], -1])        
-        self.atten_tlatent_struct = tf.reshape(self.atten_tlatent_struct, shape=[tf.shape(self.partVAE[0].z_mean)[0], -1])
         self.sgeo, self.sstruct = self.geo_struct_attention_mechanism(self.atten_latent_struct, self.input_struct, self.part_num * latent_zdim )
         self.weight_latent = tf.multiply(self.atten_latent_struct, self.sgeo)
         self.weight_struct = tf.multiply(self.input_struct, self.sstruct)
         self.weight_latent_struct = tf.concat([self.weight_latent, self.weight_struct], axis=1)        
         # Calculate Triplet loss of all VAE part
         self.distanceMatrix = self.get_l1_matrix(self.weight_latent_struct, name='l1_matrix')
-        self.tdistanceMatrix = self.get_l1_matrix(self.weight_latent_struct, name='tl1_matrix')
         self.margin = self.distanceMatrix - self.bound
         self.standard = self.margin * self.input_label
         self.sigmoidresult = tf.sigmoid(self.standard)
         self.total_triplet = tf.reduce_sum(self.standard)
-        self.ttotal_triplet = tf.reduce_sum(tf.sigmoid((self.tdistanceMatrix - self.bound) * self.input_label))
-
+        
         # Calculate generation and KL loss of all VAE part
         self.generation_loss_set = []
-        self.tgeneration_loss_set = []
         for i in range(self.part_num):
             self.generation_loss_set.append(self.partVAE[i].generation_loss)
-            self.tgeneration_loss_set.append(self.partVAE[i].tgeneration_loss)
         self.total_generation = tf.reduce_sum(self.generation_loss_set)
-        self.ttotal_generation = tf.reduce_sum(self.tgeneration_loss_set)
-
+        
         self.KL_loss_set = []
-        self.tKL_loss_set = []
         for i in range(self.part_num):
             self.KL_loss_set.append(self.partVAE[i].KL_loss)
-            self.tKL_loss_set.append(self.partVAE[i].tKL_loss)
         self.total_KL = tf.reduce_sum(self.KL_loss_set)
-        self.ttotal_KL = tf.reduce_sum(self.tKL_loss_set)
-        
+       
         # ------------------------------------------ VAE for stage 2
         self.hiddendim_2 = latent_zdim_2
         self.embedding_inputs = tf.placeholder(tf.float32, [None, self.hiddendim_2], name = 'embedding_inputs')
-        self.encode, self.encode_std, self.encode_gauss, self.decode, self.tencode, self.tencode_std, self.tencode_gauss, self.tdecode, self.m1, self.b1, self.m2, self.b2, self.m3, self.b3 = self.vae_struct(self.weight_latent_struct, self.embedding_inputs, self.hiddendim_2, name='vae_struct')
+        self.encode, self.encode_std, self.encode_gauss, self.decode, self.tencode, self.tencode_std, self.tencode_gauss, self.tdecode = self.vae_struct(self.weight_latent_struct, self.embedding_inputs, self.hiddendim_2, name='vae_struct')
 
 		# Calculate total loss and Optimization Function for stage 2
         self.generation_loss_2 = 1 * 0.5 * tf.reduce_mean(tf.reduce_sum(tf.pow(self.weight_latent_struct - self.decode, 2), axis=1))
         self.KL_loss_2 = 0.5 * tf.reduce_mean(tf.reduce_sum(tf.square(self.encode) + tf.square(self.encode_std) - tf.log(1e-8 + tf.square(self.encode_std)) - 1, axis=1))
-        self.tgeneration_loss_2 = 1 * 0.5 * tf.reduce_mean(tf.reduce_sum(tf.pow(self.atten_tlatent_struct - self.tdecode, 2), axis=1))
-        self.tKL_loss_2 = 0.5 * tf.reduce_mean(tf.reduce_sum(tf.square(self.tencode) + tf.square(self.tencode_std) - tf.log(1e-8 + tf.square(self.tencode_std)) - 1, axis=1))
         self.bound_2 = bound_2
         self.distanceMatrix_2 = self.get_l2_matrix(self.encode, name='l1_matrix_2')
-        self.tdistanceMatrix_2 = self.get_l2_matrix(self.tencode, name='tl1_matrix_2')
         self.margin_2 = self.distanceMatrix_2 - self.bound_2
         self.standard_2 = self.margin_2 * self.input_label
         self.sigmoidresult_2 = tf.sigmoid(self.standard_2)
         self.triplet_loss_2 = tf.reduce_sum(self.standard_2)
-        self.ttriplet_loss_2 = tf.reduce_sum(tf.sigmoid((self.distanceMatrix_2 - self.bound_2) * self.input_label))
-
+        
         # Calculate total loss and Optimization Function
         self.cost_stg1 = self.total_generation + lambda1 * self.total_KL + lambda2 * self.total_triplet
-        self.tcost_stg1 = self.ttotal_generation + lambda1 * self.ttotal_KL + lambda2 * self.ttotal_triplet   
-        self.tcost_stg2 = lambda3 * self.tgeneration_loss_2 + lambda4 *  self.tKL_loss_2 + lambda5 * self.ttriplet_loss_2
         self.cost_stg2 = lambda3 * self.generation_loss_2 + lambda4 * self.KL_loss_2 + lambda5 * self.triplet_loss_2
         # self.optimizer_stg1 = tf.train.AdamOptimizer(learning_rate).minimize(self.cost_stg1)     
         # self.update_stg2 = tf.get_collection(tf.GraphKeys.TRAINABLE_VARIABLES, scope="vae_struct")
@@ -180,20 +165,12 @@ class risaNET():
         tf.summary.scalar("total_KL", self.total_KL)
         tf.summary.scalar("total_triplet", self.total_triplet)
         tf.summary.scalar('cost', self.cost_stg1)
-        tf.summary.scalar('ttotal_generation', self.ttotal_generation)
-        tf.summary.scalar("ttotal_KL", self.ttotal_KL)
-        tf.summary.scalar("ttotal_triplet", self.ttotal_triplet)
-        tf.summary.scalar('tcost', self.tcost_stg1)
-
+        
         tf.summary.histogram("DisMat2", self.distanceMatrix_2)
         tf.summary.scalar('generation2', self.generation_loss_2)
         tf.summary.scalar("KL2", self.KL_loss_2)
         tf.summary.scalar("triplet2", self.triplet_loss_2)
         tf.summary.scalar('cost2', self.cost_stg2)
-        tf.summary.scalar('tgeneration2', self.tgeneration_loss_2)
-        tf.summary.scalar("tKL2", self.tKL_loss_2)
-        tf.summary.scalar("ttriplet2", self.ttriplet_loss_2)
-        tf.summary.scalar('tcost2', self.tcost_stg2)        
         self.summaries = tf.summary.merge_all()
         self.saver = tf.train.Saver(max_to_keep=2)
 
@@ -227,25 +204,23 @@ class risaNET():
     def attention_mechanism(self, feature, Wk, Wq, key_dim, latent_zdim):
         with tf.variable_scope("attention_mechanism", reuse=tf.AUTO_REUSE) as scope:
             batch_size = tf.shape(feature)[0] 
-            Value = tf.zeros([batch_size, self.part_num])
-            Key =[] 
-            Query = tf.zeros([batch_size, key_dim])
+            Key =[] # part* [batch, key]
+            Query = tf.zeros([batch_size, key_dim]) #[batch, key]
             for p in range(self.part_num):
-                wk = Wk[p]
-                wq = Wq[p] 
-                f = feautre[:, p, :]
-                f = tf.squeeze(f) 
-                Key.append(tf.expand_dims(tf.matmul(f, wk), axis=1)) 
-                Query = Query + tf.matmul(f, wk) 
-            Query = tf.expand_dims(Query, axis=2)
-            for p in range(self.part_num)
-                Value[:, p] = tf.squeeze(tf.matmul(Key[p], Query))
-            Score = tf.exp(Value) / (1e-10 + tf.reduce_sum(tf.exp(Value), axis=1, keepdims=True)) 
-            Score_t = tf.tile(tf.expand_dims(Score, axis=2), [1, 1, latent_zdim]) 
+                wk = Wk[p] #[latent, key]
+                wq = Wq[p] #[latent, key]
+                f = feature[:, p, :]
+                f = tf.squeeze(f) #[batch, latent]
+                Key.append(tf.matmul(f, wk)) #[batch, key]
+                Query = Query + tf.matmul(f, wk) #[batch, key]
+            Query = tf.expand_dims(Query, axis=2) #[batch, key, 1]
+            Key = tf.reshape(Key, [self.part_num, batch_size, key_dim]) #[part, batch, key]
+            Key = tf.transpose(Key, perm=[1, 0, 2]) #[batch, part, key]
+            Value = tf.squeeze(tf.matmul(Key, Query)) #[batch, part]
+            Score = tf.exp(Value) / (1e-10 + tf.reduce_sum(tf.exp(Value), axis=1, keepdims=True)) #[batch, part]
+            Score_t = tf.tile(tf.expand_dims(Score, axis=2), [1, 1, latent_zdim]) #[batch, part, latent]
             Result = tf.multiply(feature, Score_t)
-            Score_r = tf.expand_dims(Score, 3)
-            tf.summary.image("Attention_Score", Score_r)
-            return Score_r, Result
+            return Score, Result
 
     def geo_struct_attention_mechanism(self, geo_feature, struct_feature, input_dim):
         with tf.variable_scope("geo_struct_attention_mechanism", reuse=tf.AUTO_REUSE) as scope:
@@ -279,11 +254,6 @@ class risaNET():
                 keep_prob = 1.0
                 scope.reuse_variables()
 
-            # if self.union:
-            #     bn = True
-            # else:
-            #     bn = False
-
             bn = True
 
             matrix1, bias1, h1 = self.linear(input_mesh, self.part_num*latent_zdim+(self.part_num)*8, 256, name = 'fc_1', training = training, special_activation = False, bn = bn)
@@ -306,10 +276,6 @@ class risaNET():
                 keep_prob = 1.0
                 scope.reuse_variables()
 
-            # if self.union:
-            #     bn = True
-            # else:
-            #     bn = False
             bn = True
 
             matrix1, bias1, h1 = self.linear(z, self.hiddendim_2, 64, name = 'fc_1', training = training, special_activation = False, bn = bn)
@@ -357,7 +323,7 @@ class risaNET():
             tencode, tencode_std = self.encoder_symm(input, training = False)
             tencode_gauss = tencode + tencode_std * embedding_inputs
             tdecode = self.decoder_symm(tencode_gauss, training = False)
-            return encode, encode_std, encode_gauss, decode, tencode, tencode_std, tencode_gauss, tdecode, m1, b1, m2, b2, m3, b3
+            return encode, encode_std, encode_gauss, decode, tencode, tencode_std, tencode_gauss, tdecode
 
     def train(self, restore=None):
         config = tf.ConfigProto()
@@ -402,9 +368,9 @@ class risaNET():
                                            feed_dict=feed_dict_ofall)
   
                 # ================Save checkpoint, write logger, write summary
-                if np.mod(epoch + 1, 200) == 0 and epoch != 0:
-                    self.saver.save(sess, logfolder + '/' + 'meshvae.model', global_step=epoch + 1)
-                    # self.save_z(logfolder + '/meshvae.model-' + str(epoch+1), logfolder, epoch+1)
+                # if np.mod(epoch + 1, 200) == 0 and epoch != 0:
+                #     self.saver.save(sess, logfolder + '/' + 'meshvae.model', global_step=epoch + 1)
+                #     # self.save_z(logfolder + '/meshvae.model-' + str(epoch+1), logfolder, epoch+1)
 
                 if np.mod(epoch + 1, 50) == 0:
                     print("%s Epoch: [%4d]G: %.4f K: %.4f T: %.4f cost1: %.4f G2: %.4f K2: %.4f T2: %.4f cost2: %.4f cost: %.8f\n"
@@ -412,26 +378,6 @@ class risaNET():
                 file.write("%s Epoch: [%4d]G: %.4f K: %.4f T: %.4f cost1: %.4f G2: %.4f K2: %.4f T2: %.4f cost2: %.4f cost: %.8f\n"
                       % (timecurrent1, epoch + 1, gen, KL, trip, cost1, gen2, KL2, trip2, cost2, cost_al))
 
-                if np.mod(epoch + 1, 200) == 0 and epoch != 0:
-                    trand_index = np.random.choice(range(4,len(self.logdr[0]),5), size=self.batch_size)
-                    teps_s = np.zeros(shape=(len(trand_index), latent_zdim))
-                    teps_logdr = np.zeros(shape=(len(trand_index), latent_zdim))
-                    teps_input = np.zeros(shape=(len(rand_index), latent_zdim_2))
-                    feed_dict_ofall = {self.input_label: input_label, self.input_struct: self.structMatrix[trand_index], self.embedding_inputs: teps_input}
-
-                    for i in range(self.part_num):
-                        feed_input_mask = self.mask[i][rand_index]
-                        feed_input_mask = np.expand_dims(feed_input_mask, 1)
-                        feed_dict_ofall[self.partVAE[i].inputs_logdr] = self.logdr[i][rand_index]
-                        feed_dict_ofall[self.partVAE[i].input_mask] = feed_input_mask
-                        feed_dict_ofall[self.partVAE[i].eps_logdr] = eps_logdr
-                        feed_dict_ofall[self.partVAE[i].eps_logdr_test] = teps_logdr                    
-                        feed_dict_ofall[self.partVAE[i].input_label] = input_label
-                    tgen, tKL, ttrip,tcost = sess.run([self.ttotal_generation, self.ttotal_KL, self.ttotal_triplet, self.tcost_stg1], feed_dict=feed_dict_ofall)
-                
-                summary = sess.run(self.summaries, feed_dict = feed_dict_ofall)
-                summary_writer.add_summary(summary)
-            summary_writer.close()
         return
 
     def save_z(self, restore, foldername, times=0):
@@ -454,30 +400,16 @@ class risaNET():
                 feed_dict_ofall[self.partVAE[i].eps_logdr] = eps_logdr
                 feed_dict_ofall[self.partVAE[i].eps_logdr_test] = teps_logdr                    
 
-            z, r, s = sess.run([self.encode, self.sgeo, self.s_r],
+            z = sess.run([self.encode],
                         feed_dict=feed_dict_ofall)
-            r = np.squeeze(r)
             z = np.squeeze(z)
-            s = np.squeeze(s)
 
             print('###Writing...')
             name = foldername + '/'  + str(times) +'test_index.h5' 
             print(name)
             f = h5py.File(name, 'w')
             f['feature_vector'] = z
-            f.close()
-
-            name_r = foldername + '/' + str(times) + 'attention_index.h5' 
-            print(name_r)
-            f = h5py.File(name_r, 'w')
-            f['attention_vector'] = r
-            f.close() 
-
-            name_s = foldername + '/partscore_index.h5'
-            print(name_s)
-            f = h5py.File(name_s, 'w')
-            f['part_vector'] = s
-            f.close()                
+            f.close()              
         return
 
 ##########################################################################################
@@ -491,5 +423,4 @@ def main():
 
 
 if __name__ == '__main__':
-    # rando()
     main()

@@ -3,8 +3,12 @@ import h5py, time
 import tensorflow as tf
 import numpy as np
 
+from utils import leaky_relu, leaky_relu2, batch_norm_wrapper
+from data_loader import load_data_new, load_neighbour, load_labelMatrix, load_structMatrix
+# from risanet import label_path
+
 class meshVAE():
-    def __init__(self, e_neighbour, edgenum, degree, maxdegree, part_no, padding=False, result_max1=0.9, result_min1=-0.9):
+    def __init__(self, batch_size, label_path, latent_zdim, bound, lambda1, learning_rate, e_neighbour, edgenum, degree, maxdegree, part_no, padding=False, result_max1=0.9, result_min1=-0.9):
         self.part_no = part_no
         self.batch_size = batch_size
         self.e_neighbour = e_neighbour 
@@ -63,10 +67,10 @@ class meshVAE():
         self.KL_loss = 0.5 * tf.reduce_mean(
             tf.reduce_sum(tf.square(self.z_mean_logdr) + tf.square(self.z_std_logdr) - tf.log(
                 1e-8 + tf.square(self.z_std_logdr)) - 1, 1)) 
-       self.tgeneration_loss = 1 * 0.5 * tf.reduce_mean(
-            tf.reduce_sum(tf.pow(self.inputs_logdr - self.test_mesh_logdr, 2), [1, 2])) 
+        self.tgeneration_loss = 1 * 0.5 * tf.reduce_mean(
+                tf.reduce_sum(tf.pow(self.inputs_logdr - self.test_mesh_logdr, 2), [1, 2])) 
         self.tKL_loss = 0.5 * tf.reduce_mean(
-            tf.reduce_sum(tf.square(self.z_mean_logdr_test) + tf.square(self.z_std_logdr_test) - tf.log(
+                tf.reduce_sum(tf.square(self.z_mean_logdr_test) + tf.square(self.z_std_logdr_test) - tf.log(
                 1e-8 + tf.square(self.z_std_logdr_test)) - 1, 1)) 
         self.distanceMatrix = self.get_l2_matrix(self.z_mean, name='l1_matrix'+str(self.part_no))
         self.margin = self.distanceMatrix - self.bound
