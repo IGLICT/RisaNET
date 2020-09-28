@@ -14,7 +14,7 @@ Shapely==1.6.4.post2
 sklearn==0.0
 subprocess32==3.5.4
 tensorboard==1.14.0
-tensorflow==1.14.0
+tensorflow==1.15.4
 tensorflow-estimator==1.14.0
 tensorflow-gpu==1.14.0
 trimesh==3.6.20
